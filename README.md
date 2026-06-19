@@ -1,9 +1,14 @@
-# Proxy Grabber & Checker
+# ProxyForge — Proxy Grabber & Checker
 
-A fast, accurate proxy grabber and live-checker. It scrapes the full free-proxy
-list from [Geonode](https://geonode.com/free-proxy-list), checks every proxy **as
-its real type** (SOCKS4 / SOCKS5 / HTTP / HTTPS), and reports the working ones —
-with a security flag for which can safely carry HTTPS/TLS traffic.
+A fast, accurate proxy grabber and live-checker, available as both a **CLI** and a
+**web app**. It scrapes the full free-proxy list from
+[Geonode](https://geonode.com/free-proxy-list), checks every proxy **as its real
+type** (SOCKS4 / SOCKS5 / HTTP / HTTPS), and reports the working ones — with a
+security flag for which can safely carry HTTPS/TLS traffic.
+
+> **Web UI:** grab → test → verify, all live in the browser with animated stats
+> and a results table that streams in as each proxy is confirmed. One-click
+> deploy to Railway.
 
 ## Features
 
@@ -30,7 +35,36 @@ with a security flag for which can safely carry HTTPS/TLS traffic.
 pip install -r requirements.txt
 ```
 
-## Usage
+## Web app
+
+```bash
+python app.py            # then open http://localhost:5000
+```
+
+The page has two tabs:
+
+- **⚡ Grab & Test** — pick filters (protocol, country, anonymity, speed) and a
+  limit, then watch proxies stream in live as they're grabbed and verified.
+- **🔁 Re-check List** — paste a saved list (`ip:port` per line) and re-test it.
+
+Results update in real time (NDJSON streaming) with animated counters for
+*Listed / Grabbed / Working / HTTPS-secure / Dead*, and you can copy or download
+the working set.
+
+## Deploy to Railway
+
+This repo is Railway-ready (`Procfile`, `railway.json`, `requirements.txt`,
+`.python-version`).
+
+1. Push to GitHub (already done).
+2. On [railway.app](https://railway.app): **New Project → Deploy from GitHub repo**
+   → pick this repo.
+3. Railway auto-detects Python (Nixpacks), installs `requirements.txt`, and runs
+   the `gunicorn` start command. No env vars required — it binds to `$PORT`
+   automatically.
+4. Open the generated public URL. Done. 🚀
+
+## CLI usage
 
 ### Grab + check
 

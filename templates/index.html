@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ProxyForge · Grab · Test · Verify</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#0a0e1a; --bg2:#0f1525; --panel:rgba(20,27,45,.72);
+    --line:rgba(255,255,255,.08); --txt:#e7ecf6; --muted:#8a96b3;
+    --accent:#6ee7ff; --accent2:#a78bfa; --green:#34d399; --amber:#fbbf24;
+    --red:#fb7185; --shadow:0 18px 60px rgba(0,0,0,.45);
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; padding:0; }
+  body {
+    font-family:'Inter',system-ui,sans-serif; color:var(--txt);
+    background:var(--bg); min-height:100vh; overflow-x:hidden;
+  }
+  /* animated aurora background */
+  .aurora { position:fixed; inset:0; z-index:-2; overflow:hidden; }
+  .aurora::before, .aurora::after {
+    content:""; position:absolute; width:60vw; height:60vw; border-radius:50%;
+    filter:blur(110px); opacity:.40; animation:float 18s ease-in-out infinite;
+  }
+  .aurora::before { background:radial-gradient(circle,#3b82f6,transparent 60%); top:-10%; left:-10%; }
+  .aurora::after  { background:radial-gradient(circle,#a855f7,transparent 60%); bottom:-15%; right:-10%; animation-delay:-9s; }
+  .grid-bg { position:fixed; inset:0; z-index:-1;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:46px 46px; mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 40%,transparent 100%); opacity:.5; }
+  @keyframes float { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(4%,5%) scale(1.12);} }
+
+  .wrap { max-width:1180px; margin:0 auto; padding:34px 20px 80px; }
+
+  header { text-align:center; margin-bottom:30px; animation:drop .7s cubic-bezier(.2,.8,.2,1); }
+  .logo { display:inline-flex; align-items:center; gap:12px; }
+  .logo .spark { width:42px; height:42px; border-radius:12px;
+    background:linear-gradient(135deg,var(--accent),var(--accent2)); display:grid; place-items:center;
+    box-shadow:0 0 26px rgba(110,231,255,.5); animation:pulse 2.6s ease-in-out infinite; }
+  .logo .spark svg { width:24px; height:24px; }
+  h1 { font-size:30px; font-weight:800; letter-spacing:-.5px; margin:0;
+    background:linear-gradient(90deg,#fff,#9fd8ff 60%,#c4b5fd); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .tagline { color:var(--muted); margin-top:8px; font-size:14.5px; }
+  @keyframes drop { from{opacity:0;transform:translateY(-16px);} to{opacity:1;transform:none;} }
+  @keyframes pulse { 0%,100%{transform:scale(1);} 50%{transform:scale(1.08);} }
+
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:18px;
+    backdrop-filter:blur(14px); box-shadow:var(--shadow); }
+
+  /* tabs */
+  .tabs { display:flex; gap:6px; background:rgba(255,255,255,.04); padding:5px; border-radius:14px; width:max-content; margin:0 auto 18px;
+    border:1px solid var(--line); animation:drop .7s .05s backwards; }
+  .tab { padding:9px 20px; border-radius:10px; cursor:pointer; font-weight:600; font-size:14px; color:var(--muted);
+    border:none; background:transparent; transition:.25s; }
+  .tab.active { color:#06131f; background:linear-gradient(135deg,var(--accent),var(--accent2)); box-shadow:0 6px 18px rgba(110,231,255,.3); }
+
+  .controls { padding:22px; margin-bottom:22px; animation:drop .7s .1s backwards; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; }
+  .field { display:flex; flex-direction:column; gap:6px; }
+  label { font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; gap:5px; }
+  .hint { cursor:help; opacity:.6; font-size:11px; border:1px solid var(--line); border-radius:50%; width:15px; height:15px;
+    display:inline-grid; place-items:center; }
+  select, input, textarea { background:rgba(0,0,0,.28); border:1px solid var(--line); color:var(--txt);
+    border-radius:11px; padding:11px 12px; font-size:14px; font-family:inherit; outline:none; transition:.2s; width:100%; }
+  select:focus, input:focus, textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(110,231,255,.14); }
+  textarea { font-family:'JetBrains Mono',monospace; font-size:12.5px; min-height:120px; resize:vertical; }
+
+  .run-row { display:flex; align-items:center; gap:14px; margin-top:20px; flex-wrap:wrap; }
+  .btn { border:none; cursor:pointer; font-family:inherit; font-weight:700; border-radius:13px; transition:.2s; }
+  .btn-run { padding:14px 30px; font-size:15.5px; color:#06131f;
+    background:linear-gradient(135deg,var(--accent),var(--accent2)); box-shadow:0 10px 30px rgba(110,231,255,.32);
+    display:inline-flex; align-items:center; gap:10px; }
+  .btn-run:hover { transform:translateY(-2px); box-shadow:0 14px 38px rgba(110,231,255,.45); }
+  .btn-run:disabled { opacity:.55; cursor:not-allowed; transform:none; }
+  .btn-run .dot { width:9px; height:9px; border-radius:50%; background:#06131f; animation:blink 1s infinite; display:none; }
+  .btn-run.busy .dot { display:inline-block; }
+  .btn-run.busy .play { display:none; }
+  @keyframes blink { 50%{opacity:.25;} }
+  .btn-ghost { padding:11px 16px; font-size:13px; color:var(--txt); background:rgba(255,255,255,.06); border:1px solid var(--line); }
+  .btn-ghost:hover { background:rgba(255,255,255,.12); }
+
+  .status-line { color:var(--muted); font-size:13.5px; min-height:18px; font-family:'JetBrains Mono',monospace; }
+
+  /* stat cards */
+  .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:14px; margin-bottom:22px; }
+  @media (max-width:720px){ .stats{ grid-template-columns:repeat(2,1fr);} }
+  .stat { padding:18px; text-align:center; position:relative; overflow:hidden; }
+  .stat .num { font-size:30px; font-weight:800; font-family:'JetBrains Mono',monospace; line-height:1; }
+  .stat .lbl { font-size:11.5px; color:var(--muted); margin-top:7px; text-transform:uppercase; letter-spacing:.6px; font-weight:600; }
+  .stat.detected .num{color:var(--accent);} .stat.grabbed .num{color:#cbd5e1;}
+  .stat.working .num{color:var(--green);} .stat.secure .num{color:var(--accent2);} .stat.dead .num{color:var(--red);}
+  .stat::after{ content:""; position:absolute; inset:0; background:linear-gradient(120deg,transparent,rgba(255,255,255,.06),transparent);
+    transform:translateX(-100%);} .stat.flash::after{ animation:sweep .6s; }
+  @keyframes sweep{to{transform:translateX(100%);}}
+
+  /* progress */
+  .progress-wrap { padding:18px 22px; margin-bottom:22px; }
+  .progress-top { display:flex; justify-content:space-between; font-size:13px; color:var(--muted); margin-bottom:10px; }
+  .bar { height:10px; background:rgba(255,255,255,.07); border-radius:99px; overflow:hidden; }
+  .bar > i { display:block; height:100%; width:0%; border-radius:99px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .3s ease; position:relative; }
+  .bar > i::after{ content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent);
+    transform:translateX(-100%); animation:shimmer 1.3s infinite;}
+  @keyframes shimmer{to{transform:translateX(100%);}}
+
+  /* results table */
+  .results { padding:0; overflow:hidden; }
+  .results-head { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--line); }
+  .results-head h3 { margin:0; font-size:15px; }
+  .results-head .actions{ display:flex; gap:8px; }
+  .tbl-scroll { max-height:460px; overflow-y:auto; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  thead th { position:sticky; top:0; background:#10182b; color:var(--muted); font-size:11px; text-transform:uppercase;
+    letter-spacing:.5px; text-align:left; padding:11px 16px; border-bottom:1px solid var(--line); z-index:1; }
+  tbody td { padding:11px 16px; border-bottom:1px solid rgba(255,255,255,.04); font-family:'JetBrains Mono',monospace; }
+  tbody tr { animation:rowin .35s ease backwards; }
+  tbody tr:hover { background:rgba(255,255,255,.03); }
+  @keyframes rowin { from{opacity:0; transform:translateX(-10px);} to{opacity:1; transform:none;} }
+  .badge { padding:3px 9px; border-radius:7px; font-size:11px; font-weight:700; font-family:'Inter'; }
+  .b-socks4{background:rgba(110,231,255,.15);color:var(--accent);}
+  .b-socks5{background:rgba(167,139,250,.16);color:var(--accent2);}
+  .b-http{background:rgba(148,163,184,.16);color:#cbd5e1;}
+  .b-https{background:rgba(52,211,153,.16);color:var(--green);}
+  .yes{color:var(--green);font-weight:700;} .no{color:var(--amber);}
+  .empty { padding:50px 20px; text-align:center; color:var(--muted); }
+  .empty svg{ width:54px; height:54px; opacity:.4; margin-bottom:12px; }
+
+  .toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(80px);
+    background:var(--green); color:#03251a; padding:12px 22px; border-radius:12px; font-weight:700; font-size:14px;
+    box-shadow:var(--shadow); transition:transform .35s cubic-bezier(.2,.8,.2,1); z-index:50; }
+  .toast.show{ transform:translateX(-50%) translateY(0);}
+  .footer{ text-align:center; color:var(--muted); font-size:12.5px; margin-top:30px; }
+  .footer code{ background:rgba(255,255,255,.06); padding:2px 7px; border-radius:6px; }
+</style>
+</head>
+<body>
+<div class="aurora"></div>
+<div class="grid-bg"></div>
+
+<div class="wrap">
+  <header>
+    <div class="logo">
+      <span class="spark"><svg viewBox="0 0 24 24" fill="none"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" fill="#06131f"/></svg></span>
+      <h1>ProxyForge</h1>
+    </div>
+    <div class="tagline">Grab thousands of proxies from Geonode · test each one live by its real type · verify what actually works</div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" data-mode="grab">⚡ Grab &amp; Test</button>
+    <button class="tab" data-mode="recheck">🔁 Re-check List</button>
+  </div>
+
+  <!-- GRAB controls -->
+  <div class="card controls" id="grabControls">
+    <div class="row">
+      <div class="field">
+        <label>Protocol <span class="hint" title="Proxy type to fetch. 'any' grabs all types — each is tested as its real type.">?</span></label>
+        <select id="protocol"><option value="any">Any (all types)</option><option value="socks4">SOCKS4</option><option value="socks5">SOCKS5</option><option value="http">HTTP</option><option value="https">HTTPS</option></select>
+      </div>
+      <div class="field">
+        <label>Country <span class="hint" title="2-letter code like US, IN, ID — or Any.">?</span></label>
+        <select id="country"><option value="any">Any</option><option value="US">US</option><option value="IN">IN</option><option value="ID">ID</option><option value="GB">GB</option><option value="DE">DE</option><option value="BR">BR</option><option value="RU">RU</option><option value="CN">CN</option></select>
+      </div>
+      <div class="field">
+        <label>Anonymity <span class="hint" title="Elite (HIA) hides you fully. 'any' = all levels.">?</span></label>
+        <select id="anonymity"><option value="any">Any</option><option value="elite">Elite</option><option value="anonymous">Anonymous</option><option value="transparent">Transparent</option></select>
+      </div>
+      <div class="field">
+        <label>Speed <span class="hint" title="Geonode's speed bucket filter.">?</span></label>
+        <select id="speed"><option value="any">Any</option><option value="fast">Fast</option><option value="medium">Medium</option><option value="slow">Slow</option></select>
+      </div>
+      <div class="field">
+        <label>Grab limit <span class="hint" title="How many proxies to grab & test (max 1500). More = longer.">?</span></label>
+        <input id="limit" type="number" value="300" min="1" max="1500" />
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px;">
+      <div class="field">
+        <label>Workers <span class="hint" title="Parallel checks. ~100 is the sweet spot; too many causes false deaths.">?</span></label>
+        <input id="workers" type="number" value="100" min="1" max="400" />
+      </div>
+      <div class="field">
+        <label>Timeout (s) <span class="hint" title="Seconds to wait per proxy before giving up.">?</span></label>
+        <input id="timeout" type="number" value="8" min="1" max="30" step="1" />
+      </div>
+      <div class="field">
+        <label>Retries <span class="hint" title="Attempts before marking dead. Free proxies are flaky — retries recover ~34%.">?</span></label>
+        <input id="retries" type="number" value="2" min="0" max="5" />
+      </div>
+    </div>
+  </div>
+
+  <!-- RECHECK controls -->
+  <div class="card controls" id="recheckControls" style="display:none;">
+    <div class="field">
+      <label>Paste proxies <span class="hint" title="One per line: ip:port (optionally 'ip:port protocol'). Comments with # are ignored.">?</span></label>
+      <textarea id="proxiesText" placeholder="184.178.172.14:4145  socks4&#10;206.189.181.32:9050  socks5&#10;1.2.3.4:8080"></textarea>
+    </div>
+    <div class="row" style="margin-top:14px;">
+      <div class="field"><label>Workers</label><input id="workersR" type="number" value="100" min="1" max="400" /></div>
+      <div class="field"><label>Timeout (s)</label><input id="timeoutR" type="number" value="8" min="1" max="30" /></div>
+      <div class="field"><label>Retries</label><input id="retriesR" type="number" value="2" min="0" max="5" /></div>
+    </div>
+  </div>
+
+  <div class="run-row">
+    <button class="btn btn-run" id="runBtn">
+      <span class="dot"></span><span class="play">🚀</span><span id="runLabel">Launch</span>
+    </button>
+    <button class="btn btn-ghost" id="stopBtn" style="display:none;">■ Stop</button>
+    <span class="status-line" id="statusLine">Ready when you are.</span>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats" style="margin-top:24px;">
+    <div class="card stat detected"><div class="num" id="sDetected">0</div><div class="lbl">Listed @ Geonode</div></div>
+    <div class="card stat grabbed"><div class="num" id="sGrabbed">0</div><div class="lbl">Grabbed</div></div>
+    <div class="card stat working"><div class="num" id="sWorking">0</div><div class="lbl">Working</div></div>
+    <div class="card stat secure"><div class="num" id="sSecure">0</div><div class="lbl">HTTPS-secure</div></div>
+    <div class="card stat dead"><div class="num" id="sDead">0</div><div class="lbl">Dead</div></div>
+  </div>
+
+  <!-- PROGRESS -->
+  <div class="card progress-wrap">
+    <div class="progress-top"><span id="progLabel">Idle</span><span id="progPct">0%</span></div>
+    <div class="bar"><i id="progBar"></i></div>
+  </div>
+
+  <!-- RESULTS -->
+  <div class="card results">
+    <div class="results-head">
+      <h3>✅ Working proxies <span id="liveCount" style="color:var(--muted);font-weight:500;"></span></h3>
+      <div class="actions">
+        <button class="btn btn-ghost" id="copyBtn">⧉ Copy</button>
+        <button class="btn btn-ghost" id="dlBtn">⭳ Download</button>
+      </div>
+    </div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>#</th><th>IP : Port</th><th>Type</th><th>HTTPS</th><th>Latency</th><th>Exit IP</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="empty" id="emptyState">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12a9 9 0 1018 0 9 9 0 00-18 0z"/><path d="M9 12l2 2 4-4"/></svg>
+        <div>Working proxies will stream in here as they're verified.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">Engine: <code>proxy_grabber.py</code> + <code>check_proxy</code> · type-aware checking with retries · hosted on Railway</div>
+</div>
+
+<div class="toast" id="toast">Copied!</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let mode = 'grab', controller = null, working = [];
+
+// ---- tab switching ----
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  mode = t.dataset.mode;
+  $('grabControls').style.display = mode === 'grab' ? '' : 'none';
+  $('recheckControls').style.display = mode === 'recheck' ? '' : 'none';
+  $('runLabel').textContent = mode === 'grab' ? 'Launch' : 'Re-check';
+});
+
+// ---- animated counter ----
+function animateTo(el, target) {
+  const start = parseInt(el.textContent.replace(/\D/g,'')) || 0;
+  if (start === target) return;
+  const t0 = performance.now(), dur = 450;
+  function step(now){
+    const k = Math.min(1, (now - t0) / dur);
+    el.textContent = Math.round(start + (target - start) * (1 - Math.pow(1-k,3))).toLocaleString();
+    if (k < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+  el.closest('.stat').classList.remove('flash'); void el.offsetWidth; el.closest('.stat').classList.add('flash');
+}
+
+function resetUI(){
+  working = [];
+  ['sDetected','sGrabbed','sWorking','sSecure','sDead'].forEach(i => $(i).textContent = '0');
+  $('tbody').innerHTML = ''; $('emptyState').style.display = 'block';
+  $('progBar').style.width = '0%'; $('progPct').textContent = '0%'; $('progLabel').textContent = 'Starting…';
+  $('liveCount').textContent = '';
+}
+
+function addRow(p){
+  $('emptyState').style.display = 'none';
+  working.push(p);
+  const tr = document.createElement('tr');
+  const proto = (p.protocol||'?').toLowerCase();
+  const lat = p.latency != null ? p.latency + ' ms' : '—';
+  tr.innerHTML = `<td>${working.length}</td><td>${p.addr}</td>
+    <td><span class="badge b-${proto}">${proto}</span></td>
+    <td>${p.https ? '<span class="yes">● yes</span>' : '<span class="no">○ no</span>'}</td>
+    <td>${lat}</td><td>${p.exit_ip||'—'}</td>`;
+  $('tbody').appendChild(tr);
+  $('liveCount').textContent = `(${working.length})`;
+}
+
+function setBusy(b){
+  $('runBtn').classList.toggle('busy', b);
+  $('runBtn').disabled = b;
+  $('stopBtn').style.display = b ? '' : 'none';
+}
+
+async function run(){
+  resetUI(); setBusy(true);
+  const payload = mode === 'grab' ? {
+    mode:'grab',
+    protocol:$('protocol').value, country:$('country').value,
+    anonymity:$('anonymity').value, speed:$('speed').value,
+    limit:+$('limit').value, workers:+$('workers').value,
+    timeout:+$('timeout').value, retries:+$('retries').value
+  } : {
+    mode:'recheck', proxies_text:$('proxiesText').value,
+    workers:+$('workersR').value, timeout:+$('timeoutR').value, retries:+$('retriesR').value
+  };
+
+  controller = new AbortController();
+  try {
+    const resp = await fetch('/api/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload), signal:controller.signal
+    });
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while(true){
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream:true});
+      let i;
+      while((i = buf.indexOf('\n')) >= 0){
+        const line = buf.slice(0,i); buf = buf.slice(i+1);
+        if (line.trim()) handleEvent(JSON.parse(line));
+      }
+    }
+  } catch(e){
+    if (e.name !== 'AbortError') $('statusLine').textContent = '⚠ ' + e.message;
+  } finally {
+    setBusy(false);
+  }
+}
+
+function handleEvent(ev){
+  switch(ev.type){
+    case 'status': $('statusLine').textContent = ev.message; break;
+    case 'detected': animateTo($('sDetected'), ev.total); break;
+    case 'grabbed': {
+      animateTo($('sGrabbed'), ev.count);
+      const bd = Object.entries(ev.breakdown||{}).map(([k,v])=>`${v} ${k}`).join(' · ');
+      $('statusLine').textContent = `Grabbed ${ev.count} from ${ev.source} ${bd?'(' + bd + ')':''} — now testing…`;
+      break;
+    }
+    case 'check_start':
+      $('progLabel').textContent = `Testing ${ev.total} proxies · ${ev.workers} workers · ${ev.retries} retries`;
+      break;
+    case 'proxy': {
+      const pct = Math.round(ev.done / ev.total * 100);
+      $('progBar').style.width = pct + '%'; $('progPct').textContent = pct + '%';
+      $('progLabel').textContent = `Checked ${ev.done} / ${ev.total}`;
+      animateTo($('sWorking'), ev.found);
+      animateTo($('sSecure'), ev.secure);
+      animateTo($('sDead'), ev.done - ev.found);
+      if (ev.alive) addRow(ev);
+      break;
+    }
+    case 'summary':
+      $('progLabel').textContent = 'Done';
+      $('statusLine').textContent = `✔ Finished — ${ev.working} working (${ev.secure} HTTPS-secure), ${ev.dead} dead of ${ev.total}.`;
+      break;
+    case 'error':
+      $('statusLine').textContent = '⚠ ' + ev.message;
+      break;
+  }
+}
+
+$('runBtn').onclick = run;
+$('stopBtn').onclick = () => { if (controller) controller.abort(); $('statusLine').textContent = 'Stopped.'; setBusy(false); };
+
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1500); }
+function exportText(){ return working.map(p => `${p.addr}  ${(p.protocol||'').toLowerCase()}  ${p.https?'https':'http'}`).join('\n'); }
+$('copyBtn').onclick = () => { if(!working.length) return toast('Nothing yet'); navigator.clipboard.writeText(exportText()); toast('Copied '+working.length+' proxies'); };
+$('dlBtn').onclick = () => {
+  if(!working.length) return toast('Nothing yet');
+  const blob = new Blob(['# ip:port  protocol  https_secure\n'+exportText()], {type:'text/plain'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'working_proxies.txt'; a.click();
+  toast('Downloaded');
+};
+</script>
+</body>
+</html>
