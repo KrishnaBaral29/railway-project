@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local tool/IDE config
+.claude/
+.vscode/
+.idea/
+
+# Generated output (proxy lists are ephemeral — regenerated each run)
+working_proxies.txt
+*.log
