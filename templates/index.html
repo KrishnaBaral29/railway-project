@@ -63,10 +63,37 @@
   label { font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; gap:5px; }
   .hint { cursor:help; opacity:.6; font-size:11px; border:1px solid var(--line); border-radius:50%; width:15px; height:15px;
     display:inline-grid; place-items:center; }
-  select, input, textarea { background:rgba(0,0,0,.28); border:1px solid var(--line); color:var(--txt);
+  input, textarea { background:rgba(0,0,0,.28); border:1px solid var(--line); color:var(--txt);
     border-radius:11px; padding:11px 12px; font-size:14px; font-family:inherit; outline:none; transition:.2s; width:100%; }
-  select:focus, input:focus, textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(110,231,255,.14); }
+  input:focus, textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(110,231,255,.14); }
   textarea { font-family:'JetBrains Mono',monospace; font-size:12.5px; min-height:120px; resize:vertical; }
+
+  /* ---- custom dropdowns (replace ugly native <select> popups) ---- */
+  .sel { position:relative; }
+  .sel select { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; } /* kept for value only */
+  .sel-trigger { display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:pointer;
+    background:rgba(0,0,0,.28); border:1px solid var(--line); color:var(--txt); border-radius:11px;
+    padding:11px 12px; font-size:14px; transition:.2s; user-select:none; }
+  .sel-trigger:hover { border-color:rgba(110,231,255,.4); }
+  .sel.open .sel-trigger { border-color:var(--accent); box-shadow:0 0 0 3px rgba(110,231,255,.14);
+    background:rgba(110,231,255,.04); }
+  .sel-chev { width:16px; height:16px; color:var(--muted); transition:transform .25s, color .2s; flex-shrink:0; }
+  .sel.open .sel-chev { transform:rotate(180deg); color:var(--accent); }
+  .sel-menu { position:absolute; top:calc(100% + 7px); left:0; right:0; z-index:40;
+    background:#0d1426; border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:5px;
+    box-shadow:0 20px 50px rgba(0,0,0,.55); max-height:248px; overflow-y:auto;
+    opacity:0; transform:translateY(-8px) scale(.98); transform-origin:top; pointer-events:none;
+    transition:opacity .2s, transform .2s; }
+  .sel.open .sel-menu { opacity:1; transform:none; pointer-events:auto; }
+  .sel-opt { padding:9px 11px; border-radius:8px; cursor:pointer; font-size:14px; color:var(--txt);
+    transition:background .15s, color .15s; display:flex; align-items:center; gap:8px; }
+  .sel-opt:hover { background:rgba(110,231,255,.12); }
+  .sel-opt.sel-active { background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#06131f; font-weight:700; }
+  .sel-opt .tick { margin-left:auto; opacity:0; font-size:12px; }
+  .sel-opt.sel-active .tick { opacity:1; }
+  .sel-menu::-webkit-scrollbar { width:9px; }
+  .sel-menu::-webkit-scrollbar-thumb { background:rgba(255,255,255,.14); border-radius:9px; border:2px solid #0d1426; }
+  .sel-menu::-webkit-scrollbar-thumb:hover { background:rgba(110,231,255,.4); }
 
   .run-row { display:flex; align-items:center; gap:14px; margin-top:20px; flex-wrap:wrap; }
   .btn { border:none; cursor:pointer; font-family:inherit; font-weight:700; border-radius:13px; transition:.2s; }
@@ -259,6 +286,56 @@
 <script>
 const $ = id => document.getElementById(id);
 let mode = 'grab', controller = null, working = [];
+
+// ---- custom dropdowns: replace native <select> popups with themed menus ----
+function enhanceSelect(sel){
+  const wrap = document.createElement('div');
+  wrap.className = 'sel';
+  sel.parentNode.insertBefore(wrap, sel);
+  wrap.appendChild(sel);
+
+  const trigger = document.createElement('div');
+  trigger.className = 'sel-trigger';
+  trigger.innerHTML = `<span class="sel-val"></span>
+    <svg class="sel-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 9l6 6 6-6"/></svg>`;
+
+  const menu = document.createElement('div');
+  menu.className = 'sel-menu';
+  [...sel.options].forEach(o => {
+    const opt = document.createElement('div');
+    opt.className = 'sel-opt';
+    opt.dataset.value = o.value;
+    opt.innerHTML = `<span>${o.textContent}</span><span class="tick">✓</span>`;
+    opt.onclick = (e) => {
+      e.stopPropagation();
+      sel.value = o.value;
+      sync();
+      sel.dispatchEvent(new Event('change'));
+      wrap.classList.remove('open');
+    };
+    menu.appendChild(opt);
+  });
+
+  wrap.appendChild(trigger);
+  wrap.appendChild(menu);
+
+  function sync(){
+    trigger.querySelector('.sel-val').textContent = sel.options[sel.selectedIndex].textContent;
+    menu.querySelectorAll('.sel-opt').forEach(x =>
+      x.classList.toggle('sel-active', x.dataset.value === sel.value));
+  }
+  sync();
+
+  trigger.onclick = (e) => {
+    e.stopPropagation();
+    const wasOpen = wrap.classList.contains('open');
+    document.querySelectorAll('.sel.open').forEach(s => s.classList.remove('open'));
+    if (!wasOpen) wrap.classList.add('open');
+  };
+}
+document.addEventListener('click', () =>
+  document.querySelectorAll('.sel.open').forEach(s => s.classList.remove('open')));
+document.querySelectorAll('select').forEach(enhanceSelect);
 
 // ---- tab switching ----
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
