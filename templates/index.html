@@ -152,6 +152,12 @@
   .b-http{background:rgba(148,163,184,.16);color:#cbd5e1;}
   .b-https{background:rgba(52,211,153,.16);color:var(--green);}
   .yes{color:var(--green);font-weight:700;} .no{color:var(--amber);}
+  .st-ok{ color:var(--green); font-weight:700; font-family:'Inter'; }
+  .st-dead{ color:var(--red); font-weight:600; font-family:'Inter'; opacity:.85; }
+  tr.dead-row td { opacity:.5; }
+  tr.dead-row:hover td { opacity:.7; }
+  .ok-flash{ color:var(--green); font-weight:700; animation:okpop .5s ease; display:inline-block; }
+  @keyframes okpop{ 0%{transform:scale(.8);opacity:0;} 60%{transform:scale(1.06);} 100%{transform:scale(1);opacity:1;} }
   .empty { padding:50px 20px; text-align:center; color:var(--muted); }
   .empty svg{ width:54px; height:54px; opacity:.4; margin-bottom:12px; }
 
@@ -260,32 +266,32 @@
   <!-- RESULTS -->
   <div class="card results">
     <div class="results-head">
-      <h3>✅ Working proxies <span id="liveCount" style="color:var(--muted);font-weight:500;"></span></h3>
+      <h3>📡 Live results <span id="liveCount" style="color:var(--muted);font-weight:500;"></span></h3>
       <div class="actions">
-        <button class="btn btn-ghost" id="copyBtn">⧉ Copy</button>
+        <button class="btn btn-ghost" id="copyBtn">⧉ Copy working</button>
         <button class="btn btn-ghost" id="dlBtn">⭳ Download</button>
       </div>
     </div>
     <div class="tbl-scroll">
       <table>
-        <thead><tr><th>#</th><th>IP : Port</th><th>Type</th><th>HTTPS</th><th>Latency</th><th>Exit IP</th></tr></thead>
+        <thead><tr><th>#</th><th>Status</th><th>IP : Port</th><th>Type</th><th>HTTPS</th><th>Latency</th><th>Exit IP</th></tr></thead>
         <tbody id="tbody"></tbody>
       </table>
       <div class="empty" id="emptyState">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12a9 9 0 1018 0 9 9 0 00-18 0z"/><path d="M9 12l2 2 4-4"/></svg>
-        <div>Working proxies will stream in here as they're verified.</div>
+        <div>Each proxy will stream in here live as it's tested — ✅ working or ❌ dead.</div>
       </div>
     </div>
   </div>
 
-  <div class="footer">Engine: <code>proxy_grabber.py</code> + <code>check_proxy</code> · type-aware checking with retries · hosted on Railway</div>
+  <div class="footer">Engine: <code>proxy_grabber.py</code> + <code>check_proxy</code> · type-aware checking with retries</div>
 </div>
 
 <div class="toast" id="toast">Copied!</div>
 
 <script>
 const $ = id => document.getElementById(id);
-let mode = 'grab', controller = null, working = [];
+let mode = 'grab', controller = null, working = [], rowIdx = 0;
 
 // ---- custom dropdowns: replace native <select> popups with themed menus ----
 function enhanceSelect(sel){
@@ -362,25 +368,34 @@ function animateTo(el, target) {
 }
 
 function resetUI(){
-  working = [];
+  working = []; rowIdx = 0;
   ['sDetected','sGrabbed','sWorking','sSecure','sDead'].forEach(i => $(i).textContent = '0');
   $('tbody').innerHTML = ''; $('emptyState').style.display = 'block';
   $('progBar').style.width = '0%'; $('progPct').textContent = '0%'; $('progLabel').textContent = 'Starting…';
   $('liveCount').textContent = '';
 }
 
-function addRow(p){
+// Stream EVERY checked proxy into the table — working (✅) and dead (❌) —
+// so progress is always visible. Only working ones are kept for export.
+function addResultRow(p){
   $('emptyState').style.display = 'none';
-  working.push(p);
+  rowIdx++;
+  if (p.alive) working.push(p);
   const tr = document.createElement('tr');
+  if (!p.alive) tr.className = 'dead-row';
   const proto = (p.protocol||'?').toLowerCase();
   const lat = p.latency != null ? p.latency + ' ms' : '—';
-  tr.innerHTML = `<td>${working.length}</td><td>${p.addr}</td>
+  const status = p.alive
+    ? '<span class="st-ok">✅ working</span>'
+    : '<span class="st-dead">❌ dead</span>';
+  const https = p.alive
+    ? (p.https ? '<span class="yes">● yes</span>' : '<span class="no">○ no</span>')
+    : '—';
+  tr.innerHTML = `<td>${rowIdx}</td><td>${status}</td><td>${p.addr}</td>
     <td><span class="badge b-${proto}">${proto}</span></td>
-    <td>${p.https ? '<span class="yes">● yes</span>' : '<span class="no">○ no</span>'}</td>
-    <td>${lat}</td><td>${p.exit_ip||'—'}</td>`;
+    <td>${https}</td><td>${lat}</td><td>${p.exit_ip||'—'}</td>`;
   $('tbody').appendChild(tr);
-  $('liveCount').textContent = `(${working.length})`;
+  $('liveCount').textContent = `(${working.length} working · ${rowIdx} tested)`;
 }
 
 function setBusy(b){
@@ -433,16 +448,22 @@ async function run(){
 
 function handleEvent(ev){
   switch(ev.type){
+    case 'ping': break;  // anti-buffer padding — ignore
     case 'status': $('statusLine').textContent = ev.message; break;
-    case 'detected': animateTo($('sDetected'), ev.total); break;
+    case 'detected':
+      animateTo($('sDetected'), ev.total);
+      $('statusLine').textContent = `Found ${ev.total.toLocaleString()} proxies listed — grabbing your batch…`;
+      break;
     case 'grabbed': {
       animateTo($('sGrabbed'), ev.count);
       const bd = Object.entries(ev.breakdown||{}).map(([k,v])=>`${v} ${k}`).join(' · ');
-      $('statusLine').textContent = `Grabbed ${ev.count} from ${ev.source} ${bd?'(' + bd + ')':''} — now testing…`;
+      $('statusLine').innerHTML = `<span class="ok-flash">✅ Grabbed ${ev.count} proxies</span> from ${ev.source}${bd?' ('+bd+')':''} — starting checks…`;
+      $('progLabel').textContent = `Grabbed ${ev.count} — preparing to test…`;
       break;
     }
     case 'check_start':
-      $('progLabel').textContent = `Testing ${ev.total} proxies · ${ev.workers} workers · ${ev.retries} retries`;
+      $('statusLine').textContent = `🔍 Checking ${ev.total} grabbed proxies (${ev.workers} workers · ${ev.retries} retries)…`;
+      $('progLabel').textContent = `Testing 0 / ${ev.total}`;
       break;
     case 'proxy': {
       const pct = Math.round(ev.done / ev.total * 100);
@@ -451,12 +472,14 @@ function handleEvent(ev){
       animateTo($('sWorking'), ev.found);
       animateTo($('sSecure'), ev.secure);
       animateTo($('sDead'), ev.done - ev.found);
-      if (ev.alive) addRow(ev);
+      addResultRow(ev);   // show EVERY proxy (✅ working or ❌ dead)
       break;
     }
     case 'summary':
-      $('progLabel').textContent = 'Done';
-      $('statusLine').textContent = `✔ Finished — ${ev.working} working (${ev.secure} HTTPS-secure), ${ev.dead} dead of ${ev.total}.`;
+      $('progLabel').textContent = 'Done ✓';
+      $('statusLine').innerHTML = ev.working > 0
+        ? `<span class="ok-flash">✔ Finished — ${ev.working} working</span> (${ev.secure} HTTPS-secure), ${ev.dead} dead of ${ev.total}.`
+        : `Finished — 0 working of ${ev.total}. Free proxies die fast; try a bigger batch or run again.`;
       break;
     case 'error':
       $('statusLine').textContent = '⚠ ' + ev.message;

@@ -200,6 +200,11 @@ def run():
     data = request.get_json(silent=True) or {}
 
     def generate():
+        # Anti-buffering preamble: a chunk of padding forces threshold-based
+        # reverse proxies (code-server's /proxy/, nginx, etc.) to start
+        # flushing immediately instead of holding the whole response. The
+        # client ignores any line that isn't valid JSON / is a "ping".
+        yield json.dumps({"type": "ping", "_": " " * 8192}) + "\n"
         for line in _event_stream(data):
             yield line
 
@@ -209,6 +214,7 @@ def run():
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",   # disable proxy buffering (nginx/railway)
+            "Content-Encoding": "identity",  # avoid gzip buffering by proxies
         },
     )
 
