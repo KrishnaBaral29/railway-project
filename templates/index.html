@@ -404,7 +404,10 @@ async function run(){
 
   controller = new AbortController();
   try {
-    const resp = await fetch('/api/run', {
+    // relative URL so it works both at "/" (local) and under a reverse-proxy
+    // sub-path like code-server's "/proxy/5000/" (Hugging Face Space, etc.)
+    const apiUrl = new URL('api/run', window.location.href).href;
+    const resp = await fetch(apiUrl, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify(payload), signal:controller.signal
     });
