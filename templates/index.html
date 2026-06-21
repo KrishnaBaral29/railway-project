@@ -137,7 +137,9 @@
   .results { padding:0; overflow:hidden; }
   .results-head { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--line); }
   .results-head h3 { margin:0; font-size:15px; }
-  .results-head .actions{ display:flex; gap:8px; }
+  .results-head .actions{ display:flex; gap:8px; align-items:center; }
+  .results-head .sort-wrap .sel{ width:168px; }
+  .results-head .sort-wrap .sel-trigger{ padding:9px 11px; font-size:13px; }
   .tbl-scroll { max-height:460px; overflow-y:auto; }
   table { width:100%; border-collapse:collapse; font-size:13.5px; }
   thead th { position:sticky; top:0; background:#10182b; color:var(--muted); font-size:11px; text-transform:uppercase;
@@ -267,6 +269,15 @@
     <div class="results-head">
       <h3>📡 Live results <span id="liveCount" style="color:var(--muted);font-weight:500;"></span></h3>
       <div class="actions">
+        <div class="sort-wrap">
+          <select id="sortSel">
+            <option value="live">↕ Live order</option>
+            <option value="working">✅ Working first</option>
+            <option value="dead">❌ Dead first</option>
+            <option value="fastest">⚡ Fastest first</option>
+            <option value="country">🌍 By country</option>
+          </select>
+        </div>
         <button class="btn btn-ghost" id="copyBtn">⧉ Copy working</button>
         <button class="btn btn-ghost" id="dlBtn">⭳ Download</button>
       </div>
@@ -290,7 +301,8 @@
 
 <script>
 const $ = id => document.getElementById(id);
-let mode = 'grab', working = [], rowIdx = 0, currentJob = null, aborted = false;
+let mode = 'grab', working = [], allResults = [], rowIdx = 0, currentJob = null, aborted = false;
+let currentSort = 'live', renderQueued = false;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // 2-letter country code -> flag emoji (regional indicator symbols)
@@ -376,21 +388,15 @@ function animateTo(el, target) {
 }
 
 function resetUI(){
-  working = []; rowIdx = 0;
+  working = []; allResults = []; rowIdx = 0;
   ['sGrabbed','sWorking','sSecure','sDead'].forEach(i => $(i).textContent = '0');
   $('tbody').innerHTML = ''; $('emptyState').style.display = 'block';
   $('progBar').style.width = '0%'; $('progPct').textContent = '0%'; $('progLabel').textContent = 'Starting…';
   $('liveCount').textContent = '';
 }
 
-// Stream EVERY checked proxy into the table — working (✅) and dead (❌) —
-// so progress is always visible. Only working ones are kept for export.
-function addResultRow(p){
-  $('emptyState').style.display = 'none';
-  rowIdx++;
-  if (p.alive) working.push(p);
-  const tr = document.createElement('tr');
-  if (!p.alive) tr.className = 'dead-row';
+// Build the <tr> HTML for one proxy (idx = its display number).
+function rowHtml(p, idx){
   const proto = (p.protocol||'?').toLowerCase();
   const lat = p.latency != null ? p.latency + ' ms' : '—';
   const status = p.alive
@@ -401,11 +407,52 @@ function addResultRow(p){
     : '—';
   const cc = (p.country && p.country !== 'Unknown') ? p.country : '';
   const country = cc ? `${flag(cc)} ${cc}` : '<span style="opacity:.4">—</span>';
-  tr.innerHTML = `<td>${rowIdx}</td><td>${status}</td><td>${p.addr}</td>
+  return `<td>${idx}</td><td>${status}</td><td>${p.addr}</td>
     <td>${country}</td>
     <td><span class="badge b-${proto}">${proto}</span></td>
     <td>${https}</td><td>${lat}</td><td>${p.exit_ip||'—'}</td>`;
-  $('tbody').appendChild(tr);
+}
+
+function sortedResults(){
+  const a = allResults.slice();
+  const lat = p => (p.alive && p.latency != null) ? p.latency : 9e15;
+  switch(currentSort){
+    case 'working': a.sort((x,y)=>(y.alive-x.alive) || (lat(x)-lat(y))); break;
+    case 'dead':    a.sort((x,y)=>(x.alive-y.alive)); break;
+    case 'fastest': a.sort((x,y)=>(y.alive-x.alive) || (lat(x)-lat(y))); break;
+    case 'country': a.sort((x,y)=> String(x.country||'~').localeCompare(y.country||'~') || (y.alive-x.alive)); break;
+    default: break; // 'live' = insertion order
+  }
+  return a;
+}
+
+// Full rebuild of the table according to the current sort.
+function renderTable(){
+  const rows = sortedResults();
+  const html = rows.map((p,i)=>`<tr class="${p.alive?'':'dead-row'}">${rowHtml(p, i+1)}</tr>`).join('');
+  $('tbody').innerHTML = html;
+}
+function scheduleRender(){
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(()=>{ renderQueued = false; renderTable(); });
+}
+
+// Stream EVERY checked proxy — working (✅) and dead (❌). In live-order mode we
+// append the single new row (fast); in any sorted mode we re-render (debounced).
+function addResultRow(p){
+  $('emptyState').style.display = 'none';
+  rowIdx++;
+  allResults.push(p);
+  if (p.alive) working.push(p);
+  if (currentSort === 'live'){
+    const tr = document.createElement('tr');
+    if (!p.alive) tr.className = 'dead-row';
+    tr.innerHTML = rowHtml(p, rowIdx);
+    $('tbody').appendChild(tr);
+  } else {
+    scheduleRender();
+  }
   $('liveCount').textContent = `(${working.length} working · ${rowIdx} tested)`;
 }
 
@@ -503,6 +550,8 @@ function handleEvent(ev){
       break;
   }
 }
+
+$('sortSel').onchange = () => { currentSort = $('sortSel').value; renderTable(); };
 
 $('runBtn').onclick = run;
 $('stopBtn').onclick = async () => {
