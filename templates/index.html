@@ -273,7 +273,7 @@
     </div>
     <div class="tbl-scroll">
       <table>
-        <thead><tr><th>#</th><th>Status</th><th>IP : Port</th><th>Type</th><th>HTTPS</th><th>Latency</th><th>Exit IP</th></tr></thead>
+        <thead><tr><th>#</th><th>Status</th><th>IP : Port</th><th>Country</th><th>Type</th><th>HTTPS</th><th>Latency</th><th>Exit IP</th></tr></thead>
         <tbody id="tbody"></tbody>
       </table>
       <div class="empty" id="emptyState">
@@ -292,6 +292,14 @@
 const $ = id => document.getElementById(id);
 let mode = 'grab', working = [], rowIdx = 0, currentJob = null, aborted = false;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// 2-letter country code -> flag emoji (regional indicator symbols)
+function flag(cc){
+  if (!cc || cc.length !== 2 || cc === 'Un') return '';
+  const up = cc.toUpperCase();
+  if (!/^[A-Z]{2}$/.test(up)) return '';
+  return String.fromCodePoint(...[...up].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
+}
 
 // ---- custom dropdowns: replace native <select> popups with themed menus ----
 function enhanceSelect(sel){
@@ -391,7 +399,10 @@ function addResultRow(p){
   const https = p.alive
     ? (p.https ? '<span class="yes">● yes</span>' : '<span class="no">○ no</span>')
     : '—';
+  const cc = (p.country && p.country !== 'Unknown') ? p.country : '';
+  const country = cc ? `${flag(cc)} ${cc}` : '<span style="opacity:.4">—</span>';
   tr.innerHTML = `<td>${rowIdx}</td><td>${status}</td><td>${p.addr}</td>
+    <td>${country}</td>
     <td><span class="badge b-${proto}">${proto}</span></td>
     <td>${https}</td><td>${lat}</td><td>${p.exit_ip||'—'}</td>`;
   $('tbody').appendChild(tr);
@@ -507,11 +518,11 @@ $('stopBtn').onclick = async () => {
 };
 
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1500); }
-function exportText(){ return working.map(p => `${p.addr}  ${(p.protocol||'').toLowerCase()}  ${p.https?'https':'http'}`).join('\n'); }
+function exportText(){ return working.map(p => `${p.addr}  ${(p.protocol||'').toLowerCase()}  ${p.https?'https':'http'}  ${p.country||'Unknown'}`).join('\n'); }
 $('copyBtn').onclick = () => { if(!working.length) return toast('Nothing yet'); navigator.clipboard.writeText(exportText()); toast('Copied '+working.length+' proxies'); };
 $('dlBtn').onclick = () => {
   if(!working.length) return toast('Nothing yet');
-  const blob = new Blob(['# ip:port  protocol  https_secure\n'+exportText()], {type:'text/plain'});
+  const blob = new Blob(['# ip:port  protocol  https_secure  country\n'+exportText()], {type:'text/plain'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'working_proxies.txt'; a.click();
   toast('Downloaded');
 };

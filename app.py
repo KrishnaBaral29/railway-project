@@ -220,6 +220,7 @@ def _run_job(job: Job, data: dict) -> None:
                         protocol=p.protocol if p.alive else (p.protocols[0] if p.protocols else "?"),
                         https=p.secure, latency=p.latency_ms,
                         exit_ip=p.exit_ip, error=p.error,
+                        country=p.country or "Unknown",
                     )
         finally:
             # Don't block on in-flight checks if we were stopped.

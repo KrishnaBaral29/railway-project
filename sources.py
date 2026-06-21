@@ -127,6 +127,35 @@ def _src_geonode(limit, filters):
     return [(p.ip, p.port, list(p.protocols)) for p in proxies]
 
 
+def geolocate(proxies: list[Proxy]) -> None:
+    """Fill `.country` (2-letter code) for proxies that don't have one yet,
+    using ip-api.com's free batch endpoint (up to 100 IPs per request).
+
+    Geonode proxies already carry a country; raw-list sources don't, so this
+    gives every proxy a country regardless of where it came from. Best-effort:
+    failures leave the country as 'Unknown'.
+    """
+    by_ip: dict[str, list[Proxy]] = {}
+    for p in proxies:
+        if not p.country or p.country in ("Unknown", ""):
+            by_ip.setdefault(p.ip, []).append(p)
+    ips = list(by_ip)
+    for i in range(0, len(ips), 100):
+        chunk = ips[i:i + 100]
+        try:
+            r = requests.post(
+                "http://ip-api.com/batch?fields=countryCode,query",
+                json=chunk, headers=HEADERS, timeout=15)
+            for item in r.json():
+                cc = item.get("countryCode")
+                q = item.get("query")
+                if cc and q in by_ip:
+                    for p in by_ip[q]:
+                        p.country = cc
+        except Exception:  # noqa: BLE001
+            continue
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -219,6 +248,9 @@ def grab_multi(limit=300, protocol="any", country="any",
                 break
         if len(ordered) >= limit:
             break
+
+    # Enrich with country (2-letter code) for every proxy, all sources.
+    geolocate(ordered)
 
     stats = {"fetched": fetched, "used": used, "total_unique": len(seen),
              "sources": active}
