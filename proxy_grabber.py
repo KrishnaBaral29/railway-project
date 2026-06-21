@@ -148,7 +148,9 @@ def grab_proxies(limit: int = 0, filters: dict | None = None,
     limit=0 (default) grabs every available proxy. Duplicates never counted.
     """
     filters = filters if filters is not None else dict(DEFAULT_FILTERS)
-    per_page = 500                       # API hard max (600+ is rejected)
+    # Request only as many as needed: tiny limits pull a tiny page (so asking
+    # for 20 fetches 20, not 500). 500 is the API hard max (600+ is rejected).
+    per_page = min(500, limit) if limit else 500
 
     shown = ", ".join(f"{k}={v}" for k, v in filters.items()
                       if k not in ("sort_by", "sort_type")) or "none (ALL proxies)"

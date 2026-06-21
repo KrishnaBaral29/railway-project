@@ -1,41 +1,67 @@
 #!/usr/bin/env python3
 """
-Proxy Grabber — Web app
-=======================
+Proxy Grabber — Web app (polling model)
+=======================================
 
-A thin Flask layer over the existing CLI engine (proxy_grabber.py). It streams
-live results to the browser as NDJSON (one JSON object per line) so the UI can
-show each proxy the moment it's checked — same behaviour as the terminal tool.
+A thin Flask layer over the existing CLI engine (proxy_grabber.py).
+
+Why polling instead of streaming: when this app is reached through a reverse
+proxy that buffers the whole response body until end-of-response (code-server's
+/proxy/<port>/, Hugging Face Spaces' edge router, some CDNs), a single long
+streamed response shows NOTHING until the run finishes, then dumps everything at
+once. No header/padding/flush trick reliably beats full-response buffering.
+
+Short-polling is immune by construction: every /status reply is a small,
+*complete* response, so the proxy has no long-lived body to hold. The browser
+gets live progress through any proxy.
 
 Endpoints:
-    GET  /              -> the single-page UI
-    POST /api/run       -> NDJSON stream; mode = "grab" (Geonode) or "recheck"
-    GET  /healthz       -> health probe
+    GET  /                       -> the single-page UI
+    POST /api/start              -> {job_id}; spawns a background worker
+    GET  /api/status/<id>?cursor=N -> new events since N + phase
+    POST /api/stop               -> {job_id} signals the worker to halt
+    GET  /healthz                -> health probe
 
 Run locally:   python app.py
-On Railway:    gunicorn app:app  (see Procfile)
+On a host:     gunicorn app:app --workers 1 --threads 16  (single process so the
+               in-memory job store is shared across request threads)
 """
 
 from __future__ import annotations
 
 import concurrent.futures as cf
-import json
 import os
+import threading
+import time
+import uuid
 
-from flask import Flask, Response, render_template, request
+from flask import Flask, jsonify, render_template, request
 
-from proxy_grabber import (
-    Proxy,
-    check_proxy,
-    grab_proxies,
-    _fetch_page,
-)
+from proxy_grabber import Proxy, check_proxy, grab_proxies
 
 app = Flask(__name__)
 
 # Safety caps so a single request can't exhaust the server.
 MAX_LIMIT = 1500
 MAX_WORKERS = 400
+
+# In-memory job store (single process). job_id -> Job.
+JOBS: dict[str, "Job"] = {}
+JOBS_LOCK = threading.Lock()
+JOB_TTL = 600        # seconds to keep a finished job around for late polls
+JOB_MAX_AGE = 1800   # hard cap; reap any job older than this
+
+
+class Job:
+    def __init__(self):
+        self.id = uuid.uuid4().hex
+        self.results: list[dict] = []   # ordered event log (append-only)
+        self.phase = "running"          # running | done | stopped | error
+        self.error: str | None = None
+        self.created_at = time.time()
+        self.finished_at: float | None = None
+        self.stop_event = threading.Event()
+        self.lock = threading.Lock()    # guards results/phase reads+writes
 
 
 # ---------------------------------------------------------------------------
@@ -48,12 +74,6 @@ def _clamp(v, lo, hi, default):
     except (TypeError, ValueError):
         return default
     return max(lo, min(hi, v))
-
-
-def _emit(event_type: str, **payload) -> str:
-    """Serialize one NDJSON event line."""
-    payload["type"] = event_type
-    return json.dumps(payload) + "\n"
 
 
 def _build_filters(data: dict) -> dict:
@@ -108,82 +128,104 @@ def _breakdown(proxies: list[Proxy]) -> dict:
     return counts
 
 
+def _reap_jobs() -> None:
+    """Drop finished/old jobs so the store doesn't grow unbounded."""
+    now = time.time()
+    with JOBS_LOCK:
+        for jid in list(JOBS):
+            j = JOBS[jid]
+            if (j.finished_at and now - j.finished_at > JOB_TTL) or \
+               (now - j.created_at > JOB_MAX_AGE):
+                del JOBS[jid]
+
+
 # ---------------------------------------------------------------------------
-# Streaming engine
+# Worker — runs in a background thread, appends events to the job log
 # ---------------------------------------------------------------------------
 
-def _stream_check(proxies, workers, timeout, retries):
-    """Yield NDJSON events for each checked proxy + a final summary."""
-    total = len(proxies)
-    done = found = secure = 0
-    yield _emit("check_start", total=total, workers=workers,
-                timeout=timeout, retries=retries)
-
-    with cf.ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(check_proxy, p, timeout, retries): p
-                   for p in proxies}
-        for fut in cf.as_completed(futures):
-            p = fut.result()
-            done += 1
-            if p.alive:
-                found += 1
-                if p.secure:
-                    secure += 1
-            yield _emit(
-                "proxy",
-                done=done, total=total, found=found, secure=secure,
-                addr=p.addr, alive=p.alive,
-                protocol=p.protocol if p.alive else (p.protocols[0] if p.protocols else "?"),
-                https=p.secure,
-                latency=p.latency_ms,
-                exit_ip=p.exit_ip,
-                error=p.error,
-            )
-
-    yield _emit("summary", total=total, working=found, secure=secure,
-                dead=total - found)
-
-
-def _event_stream(data: dict):
-    mode = data.get("mode", "grab")
-    workers = _clamp(data.get("workers", 100), 1, MAX_WORKERS, 100)
-    timeout = _clamp(data.get("timeout", 8), 1.0, 30.0, 8.0)
-    retries = _clamp(data.get("retries", 2), 0, 5, 2)
+def _run_job(job: Job, data: dict) -> None:
+    def emit(**ev):
+        with job.lock:
+            job.results.append(ev)
 
     try:
+        mode = data.get("mode", "grab")
+        workers = _clamp(data.get("workers", 100), 1, MAX_WORKERS, 100)
+        timeout = _clamp(data.get("timeout", 8), 1.0, 30.0, 8.0)
+        retries = _clamp(data.get("retries", 2), 0, 5, 2)
+
+        # ---- acquire the proxy list ----
         if mode == "recheck":
             proxies = _parse_pasted(data.get("proxies_text", ""))
             if not proxies:
-                yield _emit("error", message="No valid proxies found in the input.")
+                emit(type="error", message="No valid proxies found in the input.")
+                job.error = "No valid proxies found in the input."
+                job.phase = "error"
                 return
-            yield _emit("grabbed", count=len(proxies),
-                        breakdown=_breakdown(proxies), source="pasted list")
+            emit(type="grabbed", count=len(proxies),
+                 breakdown=_breakdown(proxies), source="pasted list")
         else:
             limit = _clamp(data.get("limit", 300), 1, MAX_LIMIT, 300)
             filters = _build_filters(data)
-            shown = ", ".join(f"{k}={v}" for k, v in filters.items()
-                              if k not in ("sort_by", "sort_type")) or "all proxies"
-            yield _emit("status", message=f"Connecting to Geonode ({shown}) ...")
-
-            # Quick total for the "Detected N" stat.
-            try:
-                total_avail = _fetch_page(filters, 1, 1).get("total", 0)
-                yield _emit("detected", total=total_avail)
-            except Exception:  # noqa: BLE001
-                pass
-
-            yield _emit("status", message="Grabbing & de-duplicating proxies ...")
+            emit(type="status", message="Grabbing your proxies from Geonode …")
             proxies = grab_proxies(limit=limit, filters=filters)
             if not proxies:
-                yield _emit("error", message="Geonode returned no proxies for those filters.")
+                emit(type="error", message="Geonode returned no proxies for those filters.")
+                job.error = "no proxies"
+                job.phase = "error"
                 return
-            yield _emit("grabbed", count=len(proxies),
-                        breakdown=_breakdown(proxies), source="Geonode")
+            emit(type="grabbed", count=len(proxies),
+                 breakdown=_breakdown(proxies), source="Geonode")
 
-        yield from _stream_check(proxies, workers, timeout, retries)
+        # ---- check every proxy, emitting one event each ----
+        total = len(proxies)
+        done = found = secure = 0
+        emit(type="check_start", total=total, workers=workers,
+             timeout=timeout, retries=retries)
+
+        pool = cf.ThreadPoolExecutor(max_workers=workers)
+        try:
+            futures = {pool.submit(check_proxy, p, timeout, retries): p
+                       for p in proxies}
+            pending = set(futures)
+            # Wait in short slices so a Stop is honored within ~0.5s even when
+            # no check has completed yet (dead proxies can take seconds).
+            while pending:
+                if job.stop_event.is_set():
+                    job.phase = "stopped"
+                    break
+                finished, pending = cf.wait(
+                    pending, timeout=0.5, return_when=cf.FIRST_COMPLETED)
+                for fut in finished:
+                    p = fut.result()
+                    done += 1
+                    if p.alive:
+                        found += 1
+                        if p.secure:
+                            secure += 1
+                    emit(
+                        type="proxy",
+                        done=done, total=total, found=found, secure=secure,
+                        addr=p.addr, alive=p.alive,
+                        protocol=p.protocol if p.alive else (p.protocols[0] if p.protocols else "?"),
+                        https=p.secure, latency=p.latency_ms,
+                        exit_ip=p.exit_ip, error=p.error,
+                    )
+        finally:
+            # Don't block on in-flight checks if we were stopped.
+            pool.shutdown(wait=False, cancel_futures=True)
+
+        if job.phase != "stopped":
+            emit(type="summary", total=total, working=found,
+                 secure=secure, dead=total - found)
+            job.phase = "done"
 
     except Exception as exc:  # noqa: BLE001
-        yield _emit("error", message=f"{type(exc).__name__}: {exc}")
+        emit(type="error", message=f"{type(exc).__name__}: {exc}")
+        job.error = str(exc)
+        job.phase = "error"
+    finally:
+        job.finished_at = time.time()
 
 
 # ---------------------------------------------------------------------------
@@ -195,28 +237,52 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/api/run", methods=["POST"])
-def run():
+@app.route("/api/start", methods=["POST"])
+def start():
     data = request.get_json(silent=True) or {}
+    _reap_jobs()
+    job = Job()
+    with JOBS_LOCK:
+        JOBS[job.id] = job
+    threading.Thread(target=_run_job, args=(job, data), daemon=True).start()
+    return jsonify({"job_id": job.id})
 
-    def generate():
-        # Anti-buffering preamble: a chunk of padding forces threshold-based
-        # reverse proxies (code-server's /proxy/, nginx, etc.) to start
-        # flushing immediately instead of holding the whole response. The
-        # client ignores any line that isn't valid JSON / is a "ping".
-        yield json.dumps({"type": "ping", "_": " " * 8192}) + "\n"
-        for line in _event_stream(data):
-            yield line
 
-    return Response(
-        generate(),
-        mimetype="application/x-ndjson",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",   # disable proxy buffering (nginx/railway)
-            "Content-Encoding": "identity",  # avoid gzip buffering by proxies
-        },
-    )
+@app.route("/api/status/<job_id>")
+def status(job_id):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return jsonify({
+            "error": "unknown or expired job",
+            "phase": "error", "results": [], "cursor": 0, "done": True,
+        }), 404
+    try:
+        cursor = max(0, int(request.args.get("cursor", 0)))
+    except (TypeError, ValueError):
+        cursor = 0
+    with job.lock:
+        new = job.results[cursor:]
+        phase = job.phase
+        err = job.error
+    return jsonify({
+        "results": new,
+        "cursor": cursor + len(new),
+        "phase": phase,
+        "error": err,
+        "done": phase in ("done", "stopped", "error"),
+    })
+
+
+@app.route("/api/stop", methods=["POST"])
+def stop():
+    data = request.get_json(silent=True) or {}
+    with JOBS_LOCK:
+        job = JOBS.get(data.get("job_id"))
+    if job is None:
+        return jsonify({"ok": False}), 404
+    job.stop_event.set()
+    return jsonify({"ok": True})
 
 
 @app.route("/healthz")

@@ -112,7 +112,7 @@
   .status-line { color:var(--muted); font-size:13.5px; min-height:18px; font-family:'JetBrains Mono',monospace; }
 
   /* stat cards */
-  .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:14px; margin-bottom:22px; }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:22px; }
   @media (max-width:720px){ .stats{ grid-template-columns:repeat(2,1fr);} }
   .stat { padding:18px; text-align:center; position:relative; overflow:hidden; }
   .stat .num { font-size:30px; font-weight:800; font-family:'JetBrains Mono',monospace; line-height:1; }
@@ -250,7 +250,6 @@
 
   <!-- STATS -->
   <div class="stats" style="margin-top:24px;">
-    <div class="card stat detected"><div class="num" id="sDetected">0</div><div class="lbl">Listed @ Geonode</div></div>
     <div class="card stat grabbed"><div class="num" id="sGrabbed">0</div><div class="lbl">Grabbed</div></div>
     <div class="card stat working"><div class="num" id="sWorking">0</div><div class="lbl">Working</div></div>
     <div class="card stat secure"><div class="num" id="sSecure">0</div><div class="lbl">HTTPS-secure</div></div>
@@ -291,7 +290,8 @@
 
 <script>
 const $ = id => document.getElementById(id);
-let mode = 'grab', controller = null, working = [], rowIdx = 0;
+let mode = 'grab', working = [], rowIdx = 0, currentJob = null, aborted = false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ---- custom dropdowns: replace native <select> popups with themed menus ----
 function enhanceSelect(sel){
@@ -369,7 +369,7 @@ function animateTo(el, target) {
 
 function resetUI(){
   working = []; rowIdx = 0;
-  ['sDetected','sGrabbed','sWorking','sSecure','sDead'].forEach(i => $(i).textContent = '0');
+  ['sGrabbed','sWorking','sSecure','sDead'].forEach(i => $(i).textContent = '0');
   $('tbody').innerHTML = ''; $('emptyState').style.display = 'block';
   $('progBar').style.width = '0%'; $('progPct').textContent = '0%'; $('progLabel').textContent = 'Starting…';
   $('liveCount').textContent = '';
@@ -404,8 +404,12 @@ function setBusy(b){
   $('stopBtn').style.display = b ? '' : 'none';
 }
 
+// URLs are resolved against window.location so the app works both at "/"
+// (local) and under a reverse-proxy sub-path like "/proxy/5000/".
+const urlOf = p => new URL(p, window.location.href).href;
+
 async function run(){
-  resetUI(); setBusy(true);
+  resetUI(); setBusy(true); aborted = false;
   const payload = mode === 'grab' ? {
     mode:'grab',
     protocol:$('protocol').value, country:$('country').value,
@@ -417,43 +421,45 @@ async function run(){
     workers:+$('workersR').value, timeout:+$('timeoutR').value, retries:+$('retriesR').value
   };
 
-  controller = new AbortController();
   try {
-    // relative URL so it works both at "/" (local) and under a reverse-proxy
-    // sub-path like code-server's "/proxy/5000/" (Hugging Face Space, etc.)
-    const apiUrl = new URL('api/run', window.location.href).href;
-    const resp = await fetch(apiUrl, {
+    // 1) start the job (short, complete response — never buffered by proxies)
+    const sr = await fetch(urlOf('api/start'), {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(payload), signal:controller.signal
+      body:JSON.stringify(payload)
     });
-    const reader = resp.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    while(true){
-      const {done, value} = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, {stream:true});
-      let i;
-      while((i = buf.indexOf('\n')) >= 0){
-        const line = buf.slice(0,i); buf = buf.slice(i+1);
-        if (line.trim()) handleEvent(JSON.parse(line));
+    const startInfo = await sr.json();
+    if (!startInfo.job_id) throw new Error(startInfo.error || 'Could not start job');
+    currentJob = startInfo.job_id;
+
+    // 2) poll for new events (each poll is a small complete response ->
+    //    immune to reverse-proxy response buffering)
+    let cursor = 0;
+    while (!aborted){
+      let s;
+      try {
+        const r = await fetch(urlOf('api/status/' + currentJob) + '?cursor=' + cursor,
+                              { cache:'no-store' });
+        s = await r.json();
+      } catch(e){
+        await sleep(800); continue;   // transient network hiccup -> retry
       }
+      (s.results || []).forEach(handleEvent);
+      cursor = s.cursor != null ? s.cursor : cursor;
+      const gotData = s.results && s.results.length;
+      if (s.done && !gotData) break;       // fully drained + finished
+      await sleep(gotData ? 250 : 700);    // poll fast while data flows
     }
   } catch(e){
-    if (e.name !== 'AbortError') $('statusLine').textContent = '⚠ ' + e.message;
+    $('statusLine').textContent = '⚠ ' + e.message;
   } finally {
-    setBusy(false);
+    setBusy(false); currentJob = null;
   }
 }
 
 function handleEvent(ev){
   switch(ev.type){
-    case 'ping': break;  // anti-buffer padding — ignore
+    case 'ping': break;  // ignore
     case 'status': $('statusLine').textContent = ev.message; break;
-    case 'detected':
-      animateTo($('sDetected'), ev.total);
-      $('statusLine').textContent = `Found ${ev.total.toLocaleString()} proxies listed — grabbing your batch…`;
-      break;
     case 'grabbed': {
       animateTo($('sGrabbed'), ev.count);
       const bd = Object.entries(ev.breakdown||{}).map(([k,v])=>`${v} ${k}`).join(' · ');
@@ -488,7 +494,17 @@ function handleEvent(ev){
 }
 
 $('runBtn').onclick = run;
-$('stopBtn').onclick = () => { if (controller) controller.abort(); $('statusLine').textContent = 'Stopped.'; setBusy(false); };
+$('stopBtn').onclick = async () => {
+  aborted = true;
+  $('statusLine').textContent = 'Stopping…';
+  if (currentJob){
+    try { await fetch(urlOf('api/stop'), {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({job_id: currentJob})
+    }); } catch(e){}
+  }
+  $('statusLine').textContent = 'Stopped.'; setBusy(false);
+};
 
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1500); }
 function exportText(){ return working.map(p => `${p.addr}  ${(p.protocol||'').toLowerCase()}  ${p.https?'https':'http'}`).join('\n'); }
