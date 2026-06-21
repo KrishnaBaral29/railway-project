@@ -37,7 +37,8 @@ import uuid
 
 from flask import Flask, jsonify, render_template, request
 
-from proxy_grabber import Proxy, check_proxy, grab_proxies
+from proxy_grabber import Proxy, check_proxy
+from sources import grab_multi
 
 app = Flask(__name__)
 
@@ -166,16 +167,25 @@ def _run_job(job: Job, data: dict) -> None:
                  breakdown=_breakdown(proxies), source="pasted list")
         else:
             limit = _clamp(data.get("limit", 300), 1, MAX_LIMIT, 300)
-            filters = _build_filters(data)
-            emit(type="status", message="Grabbing your proxies from Geonode …")
-            proxies = grab_proxies(limit=limit, filters=filters)
+            emit(type="status",
+                 message="Grabbing proxies from all sources (Geonode, "
+                         "proxifly, monosans, proxyscrape, TheSpeedX) …")
+            proxies, stats = grab_multi(
+                limit=limit,
+                protocol=str(data.get("protocol", "any")),
+                country=str(data.get("country", "any")),
+                anonymity=str(data.get("anonymity", "any")),
+                speed=str(data.get("speed", "any")),
+            )
             if not proxies:
-                emit(type="error", message="Geonode returned no proxies for those filters.")
+                emit(type="error", message="No proxies returned from any source.")
                 job.error = "no proxies"
                 job.phase = "error"
                 return
+            used = ", ".join(f"{n}:{c}" for n, c in stats["used"].items() if c)
             emit(type="grabbed", count=len(proxies),
-                 breakdown=_breakdown(proxies), source="Geonode")
+                 breakdown=_breakdown(proxies),
+                 source=f"{len(stats['sources'])} sources ({used})")
 
         # ---- check every proxy, emitting one event each ----
         total = len(proxies)

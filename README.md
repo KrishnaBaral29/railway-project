@@ -12,8 +12,12 @@ security flag for which can safely carry HTTPS/TLS traffic.
 
 ## Features
 
-- **Fast grabbing** — pulls all ~10,000 listed proxies in a few seconds (500/page
-  via the Geonode API + concurrent page fetching).
+- **Multi-source grabbing** — pulls from 5 live sources at once (Geonode,
+  proxifly, monosans, proxyscrape, TheSpeedX), de-duplicates, and interleaves
+  them round-robin so your grab limit is a fair mix from every source. Using
+  fresher/validated lists lifts the live rate from ~3% (Geonode alone) to
+  ~35-45%.
+- **Fast grabbing** — sources are fetched concurrently; a batch lands in ~1-2s.
 - **De-duplication** — repeated `ip:port` entries are never counted.
 - **Type-aware checking** — each proxy is tested using its actual protocol, so a
   SOCKS5 proxy isn't falsely marked dead by probing it as SOCKS4. (~40% hit rate
