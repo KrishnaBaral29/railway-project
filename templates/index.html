@@ -217,12 +217,12 @@
         <input id="workers" type="number" value="100" min="1" max="400" />
       </div>
       <div class="field">
-        <label>Timeout (s) <span class="hint" title="Seconds to wait per proxy before giving up.">?</span></label>
-        <input id="timeout" type="number" value="8" min="1" max="30" step="1" />
+        <label>Timeout (s) <span class="hint" title="Max seconds to wait per proxy. Lower = faster but may miss slow proxies.">?</span></label>
+        <input id="timeout" type="number" value="7" min="1" max="30" step="1" />
       </div>
       <div class="field">
-        <label>Retries <span class="hint" title="Attempts before marking dead. Free proxies are flaky — retries recover ~34%.">?</span></label>
-        <input id="retries" type="number" value="2" min="0" max="5" />
+        <label>Retries <span class="hint" title="Re-attempts before marking dead. Higher = more accurate but slower (each dead proxy is retried). 1 is a good balance.">?</span></label>
+        <input id="retries" type="number" value="1" min="0" max="5" />
       </div>
     </div>
   </div>
@@ -235,8 +235,8 @@
     </div>
     <div class="row" style="margin-top:14px;">
       <div class="field"><label>Workers</label><input id="workersR" type="number" value="100" min="1" max="400" /></div>
-      <div class="field"><label>Timeout (s)</label><input id="timeoutR" type="number" value="8" min="1" max="30" /></div>
-      <div class="field"><label>Retries</label><input id="retriesR" type="number" value="2" min="0" max="5" /></div>
+      <div class="field"><label>Timeout (s)</label><input id="timeoutR" type="number" value="7" min="1" max="30" /></div>
+      <div class="field"><label>Retries</label><input id="retriesR" type="number" value="1" min="0" max="5" /></div>
     </div>
   </div>
 

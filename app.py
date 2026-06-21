@@ -151,8 +151,8 @@ def _run_job(job: Job, data: dict) -> None:
     try:
         mode = data.get("mode", "grab")
         workers = _clamp(data.get("workers", 100), 1, MAX_WORKERS, 100)
-        timeout = _clamp(data.get("timeout", 8), 1.0, 30.0, 8.0)
-        retries = _clamp(data.get("retries", 2), 0, 5, 2)
+        timeout = _clamp(data.get("timeout", 7), 1.0, 30.0, 7.0)
+        retries = _clamp(data.get("retries", 1), 0, 5, 1)
 
         # ---- acquire the proxy list ----
         if mode == "recheck":

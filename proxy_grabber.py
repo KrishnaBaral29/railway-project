@@ -237,11 +237,15 @@ def _safe_get(url: str, proxy: Proxy, proto: str, timeout: float) -> str | None:
       * stream + capped read  -> proxy can't flood us with a huge body.
       * response is never executed, only parsed for a short IP string.
     """
+    # Split timeout: a short CONNECT budget so an unreachable proxy fails fast
+    # (most dead proxies hang here), plus the full READ budget for slow-but-
+    # alive proxies. (connect, read) tuple is honored by requests/urllib3.
+    connect_timeout = min(4.0, timeout)
     resp = requests.get(
         url,
         proxies=proxy.proxies_dict(proto),   # connect AS this type
         headers=HEADERS,
-        timeout=timeout,
+        timeout=(connect_timeout, timeout),
         allow_redirects=False,
         verify=True,
         stream=True,
@@ -288,29 +292,31 @@ def check_proxy(proxy: Proxy, timeout: float = 8.0, retries: int = 2) -> Proxy:
     candidates = proxy.protocols or ["socks4"]
 
     # --- Stage 1: liveness, trying each real type, with retries ---
+    # Use ONE check-URL per attempt (rotated across attempts for endpoint
+    # diversity) instead of all URLs every attempt. This avoids multiplying a
+    # dead proxy's wait by len(CHECK_URLS): worst-case cost is now
+    # (retries+1) x connect_timeout, not (retries+1) x #urls x timeout.
     for attempt in range(retries + 1):
+        url = CHECK_URLS[attempt % len(CHECK_URLS)]
         for proto in candidates:
-            for url in CHECK_URLS:
-                start = time.perf_counter()
-                try:
-                    text = _safe_get(url, proxy, proto, timeout)
-                    if text is not None:
-                        proxy.alive = True
-                        proxy.working_protocol = proto
-                        proxy.latency_ms = round(
-                            (time.perf_counter() - start) * 1000, 1)
-                        proxy.exit_ip = _parse_ip(text)
-                        break
-                except Exception as exc:  # noqa: BLE001
-                    proxy.error = type(exc).__name__
-                    continue
-            if proxy.alive:
-                break
+            start = time.perf_counter()
+            try:
+                text = _safe_get(url, proxy, proto, timeout)
+                if text is not None:
+                    proxy.alive = True
+                    proxy.working_protocol = proto
+                    proxy.latency_ms = round(
+                        (time.perf_counter() - start) * 1000, 1)
+                    proxy.exit_ip = _parse_ip(text)
+                    break
+            except Exception as exc:  # noqa: BLE001
+                proxy.error = type(exc).__name__
+                continue
         if proxy.alive:
             break
         # brief backoff before the next retry (skip after the last attempt)
         if attempt < retries:
-            time.sleep(0.4)
+            time.sleep(0.25)
 
     if not proxy.alive:
         return proxy
